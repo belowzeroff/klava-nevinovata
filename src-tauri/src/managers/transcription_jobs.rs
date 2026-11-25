@@ -414,11 +414,12 @@ impl TranscriptionJobManager {
         else {
             return Ok(JobEnd::Cancelled);
         };
-        if text.is_empty() {
-            return Err(anyhow!("Recording contains no speech"));
-        }
         if cancelled.load(Ordering::Acquire) {
             return Ok(JobEnd::Cancelled);
+        }
+        if text.is_empty() {
+            hm.mark_no_speech(entry.id)?;
+            return Ok(JobEnd::NoSpeech);
         }
 
         let processed = tauri::async_runtime::block_on(process_transcription_output(
@@ -444,9 +445,10 @@ impl TranscriptionJobManager {
     }
 }
 
-/// A cancelled job changes no notices.
+/// Cancellation and silence change no notices.
 enum JobEnd {
     Finished { post_process_failed: bool },
+    NoSpeech,
     Cancelled,
 }
 

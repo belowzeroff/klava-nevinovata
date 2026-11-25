@@ -14,6 +14,7 @@ import {
 } from "tauri-plugin-macos-permissions-api";
 import "./App.css";
 import SecureInputWarning from "./components/SecureInputWarning";
+import { Button } from "./components/ui/Button";
 import Footer from "./components/footer";
 import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
 import ModelMigration from "./components/onboarding/ModelMigration";
@@ -23,6 +24,7 @@ import {
 } from "./components/onboarding/StandaloneScreens";
 import {
   clearOnboardingProgress,
+  useOnboardingStore,
   type OnboardingStep as OnboardingPreviewStep,
 } from "./components/onboarding/onboardingStore";
 import { DebugSettings, ModelsSettings } from "./components/settings";
@@ -81,6 +83,7 @@ function App() {
   // Set when a returning user's selected model is a retired (ONNX) model that
   // is still on disk: they must update it before the app can transcribe.
   const [migrationModelId, setMigrationModelId] = useState<string | null>(null);
+  const [permissionsDeferred, setPermissionsDeferred] = useState(false);
   const [currentSection, setCurrentSection] =
     useState<SidebarSection>("general");
   const showHistory = useCallback(() => setCurrentSection("history"), []);
@@ -110,7 +113,11 @@ function App() {
 
   // Initialize Enigo, shortcuts, and refresh audio devices when main app loads
   useEffect(() => {
-    if (onboardingStep === "done" && !hasCompletedPostOnboardingInit.current) {
+    if (
+      onboardingStep === "done" &&
+      !permissionsDeferred &&
+      !hasCompletedPostOnboardingInit.current
+    ) {
       hasCompletedPostOnboardingInit.current = true;
       Promise.all([
         commands.initializeEnigo(),
@@ -121,7 +128,12 @@ function App() {
       refreshAudioDevices();
       refreshOutputDevices();
     }
-  }, [onboardingStep, refreshAudioDevices, refreshOutputDevices]);
+  }, [
+    onboardingStep,
+    permissionsDeferred,
+    refreshAudioDevices,
+    refreshOutputDevices,
+  ]);
 
   // Handle keyboard shortcuts for debug mode toggle
   useEffect(() => {
@@ -148,11 +160,11 @@ function App() {
     };
   }, [settings?.debug_mode, updateSetting]);
 
-  const revealMainWindowForPermissions = async () => {
+  const revealMainWindow = async () => {
     try {
       await commands.showMainWindowCommand();
     } catch (e) {
-      console.warn("Failed to show main window for permission onboarding:", e);
+      console.warn("Failed to show main window for setup:", e);
     }
   };
 
@@ -167,11 +179,18 @@ function App() {
   // window may start hidden, so bring it forward for the update screen.
   const finishReturningUser = async (retiredModelId: string | null) => {
     if (retiredModelId) {
-      await revealMainWindowForPermissions();
+      await revealMainWindow();
       setOnboardingStep("migration");
     } else {
       setOnboardingStep("done");
     }
+  };
+
+  const finishPermissionSetup = (granted: boolean) => {
+    if (granted) setPermissionsDeferred(false);
+    const onboarding = useOnboardingStore.getState();
+    if (onboarding.welcomeBack) onboarding.set({ welcomeBack: false });
+    void finishReturningUser(migrationModelId);
   };
 
   const checkOnboardingStatus = async () => {
@@ -183,7 +202,7 @@ function App() {
       const currentPlatform = platform();
 
       if (hasCompletedOnboarding) {
-        // Returning user - check if they need to grant permissions first
+        // Returning users can use file transcription while dictation is off.
         const retiredModelId = await getMigrationModelId(
           settingsResult.data.selected_model ?? "",
         );
@@ -195,14 +214,10 @@ function App() {
               checkAccessibilityPermission(),
               checkMicrophonePermission(),
             ]);
-            if (!hasAccessibility || !hasMicrophone) {
-              await revealMainWindowForPermissions();
-              setOnboardingStep("permissions");
-              return;
-            }
+            setPermissionsDeferred(!hasAccessibility || !hasMicrophone);
           } catch (e) {
             console.warn("Failed to check macOS permissions:", e);
-            // If we can't check, proceed to main app and let them fix it there
+            setPermissionsDeferred(true);
           }
         }
 
@@ -210,21 +225,23 @@ function App() {
           try {
             const microphoneStatus =
               await commands.getWindowsMicrophonePermissionStatus();
-            if (
+            setPermissionsDeferred(
               microphoneStatus.supported &&
-              microphoneStatus.overall_access === "denied"
-            ) {
-              await revealMainWindowForPermissions();
-              setOnboardingStep("permissions");
-              return;
-            }
+                microphoneStatus.overall_access === "denied",
+            );
           } catch (e) {
             console.warn("Failed to check Windows microphone permissions:", e);
             // If we can't check, proceed to main app and let them fix it there
           }
         }
 
-        await finishReturningUser(retiredModelId);
+        // A user who chose Restart in permission setup returns to that screen.
+        if (useOnboardingStore.getState().welcomeBack) {
+          await revealMainWindow();
+          setOnboardingStep("permissions");
+        } else {
+          await finishReturningUser(retiredModelId);
+        }
       } else {
         // New user - start full onboarding
         setOnboardingStep("flow");
@@ -289,11 +306,20 @@ function App() {
       </>
     );
   } else if (onboardingStep === "flow") {
-    content = <OnboardingFlow onComplete={() => setOnboardingStep("done")} />;
+    content = (
+      <OnboardingFlow
+        onComplete={(deferred) => {
+          setPermissionsDeferred(deferred);
+          if (deferred) setCurrentSection("models");
+          setOnboardingStep("done");
+        }}
+      />
+    );
   } else if (onboardingStep === "permissions") {
     content = (
       <ReturningPermissions
-        onComplete={() => finishReturningUser(migrationModelId)}
+        onComplete={() => finishPermissionSetup(true)}
+        onBack={() => finishPermissionSetup(false)}
       />
     );
   } else if (onboardingStep === "migration" && migrationModelId) {
@@ -334,6 +360,19 @@ function App() {
                 className={`flex flex-col items-center p-4 gap-4 ${currentSection === "models" ? "h-full" : ""}`}
               >
                 <SecureInputWarning />
+                {permissionsDeferred && currentSection === "general" && (
+                  <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3">
+                    <p className="text-sm text-ink-2">
+                      {t("onboarding.permissions.dictationOnly")}
+                    </p>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setOnboardingStep("permissions")}
+                    >
+                      {t("onboarding.permissions.enableDictation")}
+                    </Button>
+                  </div>
+                )}
                 {renderSettingsContent(
                   currentSection,
                   setOnboardingPreview,

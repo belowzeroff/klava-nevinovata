@@ -10,12 +10,19 @@ import { Model } from "./screens/Model";
 
 /** Onboarding screens reused later: a revoked permission, a retired model. */
 
-export const ReturningPermissions: React.FC<{ onComplete: () => void }> = ({
-  onComplete,
-}) => {
+export const ReturningPermissions: React.FC<{
+  onComplete: () => void;
+  onBack: () => void;
+}> = ({ onComplete, onBack }) => {
   const permissions = usePermissions(false);
   if (!permissions.checked) return null;
-  return <Permissions permissions={permissions} onContinue={onComplete} />;
+  return (
+    <Permissions
+      permissions={permissions}
+      onContinue={onComplete}
+      onBack={permissions.allGranted ? onComplete : onBack}
+    />
+  );
 };
 
 export const ReplaceModel: React.FC<{

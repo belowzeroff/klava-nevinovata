@@ -32,6 +32,7 @@ export const toTableModel = (info: ModelInfo, t: TFunction): TableModel => {
     streaming: info.supports_streaming,
     translate: info.supports_translation,
     sizeMb: Number(info.size_mb),
+    usesHuggingFaceCache: repo !== null,
     // The file's own, so a different quant found on disk says so.
     quant: quantOf(info.filename) ?? model?.quant ?? null,
     kind: info.is_custom

@@ -42,12 +42,17 @@ pub(crate) fn schema_version() -> i32 {
 }
 /// Nullable columns added outside [`MIGRATIONS`]; see
 /// [`HistoryManager::apply_migrations`].
-const ADDED_COLUMNS: &[&str] = &["source_name", "language", "language_source"];
+const ADDED_COLUMNS: &[(&str, &str)] = &[
+    ("source_name", "TEXT"),
+    ("language", "TEXT"),
+    ("language_source", "TEXT"),
+    ("no_speech", "BOOLEAN"),
+];
 
 /// Every column a [`HistoryEntry`] is read from.
 const ENTRY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcription_text, \
     post_processed_text, post_process_prompt, post_process_requested, source_name, language, \
-    language_source";
+    language_source, no_speech";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct PaginatedHistory {
@@ -86,6 +91,8 @@ pub struct HistoryEntry {
     pub language: Option<String>,
     /// How that language was chosen; `None` before it was recorded.
     pub language_source: Option<LanguageSource>,
+    /// The last completed transcription found no speech.
+    pub no_speech: bool,
 }
 
 pub struct HistoryManager {
@@ -178,10 +185,10 @@ impl HistoryManager {
 
         // Not a migration: a higher user_version makes released builds refuse
         // the database, while an extra nullable column is invisible to them.
-        for column in ADDED_COLUMNS {
+        for &(column, column_type) in ADDED_COLUMNS {
             if !Self::has_column(conn, column)? {
                 conn.execute(
-                    &format!("ALTER TABLE transcription_history ADD COLUMN {column} TEXT"),
+                    &format!("ALTER TABLE transcription_history ADD COLUMN {column} {column_type}"),
                     [],
                 )?;
                 info!("Added the {column} column to transcription history");
@@ -277,6 +284,7 @@ impl HistoryManager {
                 .get::<_, Option<String>>("language_source")?
                 .as_deref()
                 .and_then(LanguageSource::parse),
+            no_speech: row.get::<_, Option<bool>>("no_speech")?.unwrap_or_default(),
         })
     }
 
@@ -309,6 +317,7 @@ impl HistoryManager {
             source_name: None,
             language,
             language_source,
+            no_speech: false,
         })?;
 
         self.cleanup_old_entries()?;
@@ -333,6 +342,7 @@ impl HistoryManager {
             source_name: Some(source_name),
             language: None,
             language_source: None,
+            no_speech: false,
         })
     }
 
@@ -402,7 +412,8 @@ impl HistoryManager {
                  post_processed_text = ?2,
                  post_process_prompt = ?3,
                  language = ?4,
-                 language_source = ?5
+                 language_source = ?5,
+                 no_speech = NULL
              WHERE id = ?6",
             params![
                 transcription_text,
@@ -418,6 +429,22 @@ impl HistoryManager {
             return Err(anyhow!("History entry {} not found", id));
         }
 
+        self.emit_entry_updated(&conn, id)
+    }
+
+    pub fn mark_no_speech(&self, id: i64) -> Result<()> {
+        let conn = self.get_connection()?;
+        if conn.execute(
+            "UPDATE transcription_history SET no_speech = 1 WHERE id = ?1",
+            [id],
+        )? > 0
+        {
+            self.emit_entry_updated(&conn, id)?;
+        }
+        Ok(())
+    }
+
+    fn emit_entry_updated(&self, conn: &Connection, id: i64) -> Result<HistoryEntry> {
         let entry = conn.query_row(
             &format!("SELECT {ENTRY_COLUMNS} FROM transcription_history WHERE id = ?1"),
             params![id],
@@ -755,7 +782,8 @@ mod tests {
                 post_process_requested BOOLEAN NOT NULL DEFAULT 0,
                 source_name TEXT,
                 language TEXT,
-                language_source TEXT
+                language_source TEXT,
+                no_speech BOOLEAN
             );",
         )
         .expect("create transcription_history table");
@@ -797,7 +825,7 @@ mod tests {
     fn migrating_adds_columns_without_raising_the_version() {
         let mut conn = Connection::open_in_memory().expect("open in-memory db");
         HistoryManager::apply_migrations(&mut conn).expect("migrate");
-        for column in ADDED_COLUMNS {
+        for &(column, _) in ADDED_COLUMNS {
             assert!(HistoryManager::has_column(&conn, column).expect("read table info"));
         }
         assert_eq!(user_version(&conn), MIGRATIONS.len() as i32);
@@ -825,6 +853,25 @@ mod tests {
             .expect("fetch latest entry")
             .expect("entry exists");
         assert_eq!(entry.transcription_text, "still works");
+    }
+
+    #[test]
+    fn history_reads_no_speech_without_replacing_previous_text() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "previous transcript", None);
+
+        let read = || {
+            HistoryManager::get_latest_entry_with_conn(&conn)
+                .expect("fetch history entry")
+                .expect("history entry exists")
+        };
+        assert!(!read().no_speech);
+
+        conn.execute("UPDATE transcription_history SET no_speech = 1", [])
+            .expect("store no-speech result");
+        let entry = read();
+        assert!(entry.no_speech);
+        assert_eq!(entry.transcription_text, "previous transcript");
     }
 
     #[test]

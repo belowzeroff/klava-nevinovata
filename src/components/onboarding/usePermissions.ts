@@ -49,8 +49,8 @@ const currentPlatform = (): PermissionPlatform => {
 
 /**
  * Microphone (macOS, Windows) and Accessibility (macOS) permissions: check,
- * request, then poll until granted. Granting Accessibility initializes input
- * so no relaunch is needed.
+ * request, then poll until granted. On macOS, initialize input once both
+ * permissions are granted so dictation is ready without a relaunch.
  */
 export const usePermissions = (preview: boolean): Permissions => {
   const { t } = useTranslation();
@@ -91,14 +91,6 @@ export const usePermissions = (preview: boolean): Permissions => {
     return !status.supported || status.overall_access !== "denied";
   }, []);
 
-  const initializeAfterAccessibility = () =>
-    Promise.all([
-      commands.initializeEnigo(),
-      commands.initializeShortcuts(),
-    ]).catch((e) => {
-      console.warn("Failed to initialize after permission grant:", e);
-    });
-
   const stopPolling = () => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
@@ -107,8 +99,16 @@ export const usePermissions = (preview: boolean): Permissions => {
   };
 
   const onAllGranted = useCallback(async () => {
+    if (isMacOS) {
+      await Promise.all([
+        commands.initializeEnigo(),
+        commands.initializeShortcuts(),
+      ]).catch((e) => {
+        console.warn("Failed to initialize after permission grant:", e);
+      });
+    }
     await Promise.all([refreshAudioDevices(), refreshOutputDevices()]);
-  }, [refreshAudioDevices, refreshOutputDevices]);
+  }, [isMacOS, refreshAudioDevices, refreshOutputDevices]);
 
   // The first check: decides whether the Permissions screen is part of the flow.
   useEffect(() => {
@@ -128,8 +128,6 @@ export const usePermissions = (preview: boolean): Permissions => {
       if (isMacOS) {
         try {
           const [acc, mic] = await readMac();
-          if (!canApply(generation)) return;
-          if (acc) await initializeAfterAccessibility();
           if (!canApply(generation)) return;
           setAccessibility(acc ? "granted" : "needed");
           setMicrophone(mic ? "granted" : "needed");
@@ -181,12 +179,10 @@ export const usePermissions = (preview: boolean): Permissions => {
           return;
         }
         const [acc, mic] = await readMac();
-        if (!canApply(generation)) return;
-        setAccessibility((prev) => {
-          if (!canApply(generation)) return prev;
-          if (acc && prev !== "granted") initializeAfterAccessibility();
-          return acc ? "granted" : prev;
-        });
+        if (!canApply(generation) || !pollingRef.current) return;
+        setAccessibility((prev) =>
+          canApply(generation) && acc ? "granted" : prev,
+        );
         setMicrophone((prev) =>
           canApply(generation) && mic ? "granted" : prev,
         );

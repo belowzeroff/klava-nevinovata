@@ -191,7 +191,7 @@ export const ModelTableRow: React.FC<ModelTableRowProps> = ({
         <span
           {...vt?.("d")}
           title={typeof shownLine === "string" ? shownLine : undefined}
-          className={`max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-ink-3 ${dim ? "opacity-60" : ""}`}
+          className={`max-w-full text-ink-3 ${tail ? "break-words whitespace-normal" : "overflow-hidden text-ellipsis whitespace-nowrap"} ${dim ? "opacity-60" : ""}`}
         >
           {shownLine}
         </span>

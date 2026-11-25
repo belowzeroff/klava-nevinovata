@@ -30,7 +30,7 @@ interface OnboardingFlowProps {
   /** The screen a preview opens on. */
   previewStep?: OnboardingStep;
   /** Called after the last screen, to show Settings. */
-  onComplete: () => void;
+  onComplete: (permissionsDeferred: boolean) => void;
 }
 
 // The backend's chinese_script values for the script picked on Welcome.
@@ -149,12 +149,15 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   };
 
   const finish = async () => {
+    const permissionsDeferred = !permissions.allGranted;
     // Saved only now: each login item change posts a macOS notification.
     if (!preview) {
-      await updateSetting("autostart_enabled", store.atLogin);
+      if (!permissionsDeferred) {
+        await updateSetting("autostart_enabled", store.atLogin);
+      }
       await commands.completeOnboarding();
     }
-    onComplete();
+    onComplete(permissionsDeferred);
     // After Settings replaces the flow, so Welcome doesn't flash.
     if (!preview) clearOnboardingProgress();
   };
@@ -203,6 +206,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           progress={progress}
           onBack={back}
           onContinue={next}
+          onSkip={finish}
         />
       );
     case "model":

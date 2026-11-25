@@ -22,6 +22,23 @@ const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const SILERO_VAD_THRESHOLD: f32 = 0.3;
 const EARSHOT_VAD_THRESHOLD: f32 = 0.5;
 
+fn microphone_allowed_at_startup() -> bool {
+    #[cfg(target_os = "macos")]
+    return tauri::async_runtime::block_on(
+        tauri_plugin_macos_permissions::check_microphone_permission(),
+    );
+
+    #[cfg(target_os = "windows")]
+    {
+        use crate::commands::audio::{get_windows_microphone_permission_status, PermissionAccess};
+        return get_windows_microphone_permission_status().overall_access
+            != PermissionAccess::Denied;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    true
+}
+
 fn set_mute(mute: bool) {
     // Expected behavior:
     // - Windows: works on most systems using standard audio drivers.
@@ -518,10 +535,7 @@ pub struct AudioRecordingManager {
 impl AudioRecordingManager {
     /* ---------- construction ------------------------------------------------ */
 
-    pub fn new(
-        app: &tauri::AppHandle,
-        stream_router: Arc<StreamRouter>,
-    ) -> Result<Self, anyhow::Error> {
+    pub fn new(app: &tauri::AppHandle, stream_router: Arc<StreamRouter>) -> Self {
         let settings = get_settings(app);
         let mode = if settings.always_on_microphone {
             MicrophoneMode::AlwaysOn
@@ -557,12 +571,15 @@ impl AudioRecordingManager {
             last_input_silent: Arc::new(AtomicBool::new(false)),
         };
 
-        // Always-on?  Open immediately.
-        if matches!(mode, MicrophoneMode::AlwaysOn) {
-            manager.start_microphone_stream()?;
+        // History and file transcription can run while the microphone is
+        // unavailable. The first dictation can open a stream once it is ready.
+        if matches!(mode, MicrophoneMode::AlwaysOn) && microphone_allowed_at_startup() {
+            if let Err(error) = manager.start_microphone_stream() {
+                warn!("Could not start always-on microphone: {error}");
+            }
         }
 
-        Ok(manager)
+        manager
     }
 
     /* ---------- helper methods --------------------------------------------- */

@@ -76,6 +76,11 @@ export const ModelRow: React.FC<{ entry: Entry }> = ({ entry }) => {
         name: entry.name,
         size,
       })}
+      {entry.usesHuggingFaceCache && (
+        <span className="mt-1 block text-warning">
+          {t("settings.models.deleteSharedCache")}
+        </span>
+      )}
     </span>
   ) : (locked && on) || (told && inert) ? (
     t("modelSelector.lockedWhileTranscribing")

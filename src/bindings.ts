@@ -1273,7 +1273,11 @@ language: string | null;
 /**
  * How that language was chosen; `None` before it was recorded.
  */
-language_source: LanguageSource | null }
+language_source: LanguageSource | null;
+/**
+ * The last completed transcription found no speech.
+ */
+no_speech: boolean }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
 /**
  * Result of changing keyboard implementation

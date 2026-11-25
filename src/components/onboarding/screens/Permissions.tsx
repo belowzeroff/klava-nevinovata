@@ -82,9 +82,10 @@ const PermissionRow: React.FC<PermissionRowProps> = ({
 
 interface PermissionsProps {
   permissions: PermissionsState;
-  /** In the flow: its place and Back. Standalone (a returning user): neither. */
+  /** In the flow: its place in the progress bar. */
   progress?: { index: number; count: number };
   onBack?: () => void;
+  onSkip?: () => void;
   onContinue: () => void;
 }
 
@@ -93,6 +94,7 @@ export const Permissions: React.FC<PermissionsProps> = ({
   permissions,
   progress,
   onBack,
+  onSkip,
   onContinue,
 }) => {
   const { t } = useTranslation();
@@ -136,28 +138,36 @@ export const Permissions: React.FC<PermissionsProps> = ({
   return (
     <OnboardingShell
       progress={progress}
-      onBack={onBack}
+      onBack={permissions.resetBusy ? undefined : onBack}
       hint={
-        permissions.allGranted
-          ? ""
-          : t(
-              isMac
-                ? "onboarding.permissions.hintBoth"
-                : "onboarding.permissions.hintMicrophone",
-            )
+        permissions.allGranted ? "" : t("onboarding.permissions.dictationOnly")
       }
       primary={
-        <Button
-          variant="primary"
-          size="lg"
-          disabled={!permissions.allGranted}
-          onClick={() => {
-            if (welcomeBack) set({ welcomeBack: false });
-            onContinue();
-          }}
-        >
-          {t("onboarding.shell.continue")}
-        </Button>
+        onSkip && !permissions.allGranted ? (
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={permissions.resetBusy}
+            onClick={() => {
+              if (welcomeBack) set({ welcomeBack: false });
+              onSkip();
+            }}
+          >
+            {t("onboarding.try.skip")}
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={!permissions.allGranted}
+            onClick={() => {
+              if (welcomeBack) set({ welcomeBack: false });
+              onContinue();
+            }}
+          >
+            {t("onboarding.shell.continue")}
+          </Button>
+        )
       }
     >
       <ScreenMain

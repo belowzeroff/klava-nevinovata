@@ -16,6 +16,8 @@ export interface TableModel {
   sizeMb: number;
   quant: string | null;
   kind: ModelKind;
+  /** Deleting this model can remove its file from the Hugging Face cache. */
+  usesHuggingFaceCache?: boolean;
   /** Catalog or legacy identity for language grading, when known. */
   model?: GradedModel;
 }

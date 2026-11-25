@@ -562,11 +562,15 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
             ? progressText
             : hasTranscription
               ? entry.transcription_text
-              : entry.source_name
-                ? // Cancelled, interrupted by a quit, or failed.
-                  t("settings.history.notTranscribed")
-                : t("settings.history.transcriptionFailed")}
+              : entry.no_speech
+                ? t("settings.history.noSpeech")
+                : entry.source_name
+                  ? t("settings.history.notTranscribed")
+                  : t("settings.history.transcriptionFailed")}
         </p>
+        {hasTranscription && !retrying && entry.no_speech && (
+          <p className="text-sm text-ink-3">{t("settings.history.noSpeech")}</p>
+        )}
         {hasTranscription && !retrying && (expanded || overflows) && (
           <button
             type="button"

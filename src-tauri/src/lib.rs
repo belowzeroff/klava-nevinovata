@@ -226,10 +226,10 @@ fn initialize_core_logic(app_handle: &AppHandle) {
         TranscriptionManager::new(app_handle, model_manager.clone())
             .expect("Failed to initialize transcription manager"),
     );
-    let recording_manager = Arc::new(
-        AudioRecordingManager::new(app_handle, transcription_manager.stream_router())
-            .expect("Failed to initialize recording manager"),
-    );
+    let recording_manager = Arc::new(AudioRecordingManager::new(
+        app_handle,
+        transcription_manager.stream_router(),
+    ));
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
 
